@@ -15,6 +15,26 @@ Production-grade order monitoring in n8n: SLA checks by status, anti-spam cooldo
   - `events` — append-only event log
   - `incidents` — current incident state (upsert by `incident_key`)
   - `error_log` — centralized error workflow
+ 
+    ## Screenshots
+
+### n8n workflows
+- Order Monitoring (Main)
+![](docs/screenshots/order-monitoring-canvas.png)
+
+- Error Handling
+![](docs/screenshots/error-handling-canvas.png)
+
+### Google Sheets
+- events
+![](docs/screenshots/gs_events_sample.png)
+
+- incidents
+![](docs/screenshots/gs_incidents_sample.png)
+
+- error_log
+![](docs/screenshots/gs_error_log_empty.png)
+
 
 ## Workflows
 
