@@ -1,0 +1,197 @@
+{
+  "name": "Error Handling (Global)1",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        -64
+      ],
+      "id": "dcff9286-ffc9-4c64-bbf4-cdc608ee8736",
+      "name": "Error Trigger (Global)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Error Payload (Global)\n// Output must be clean and stable for Sheets logging + Telegram alert.\n\nfunction safeStringify(obj) {\n  try {\n    return JSON.stringify(obj ?? null);\n  } catch (e) {\n    return JSON.stringify({ stringify_error: String(e), fallback: String(obj) });\n  }\n}\n\nconst input = $json || {};\nconst execution = input.execution || {};\nconst error = input.error || {};\n\nconst ts = new Date().toISOString();\n\nconst workflow =\n  (execution.workflow && (execution.workflow.name || execution.workflow.id)) ||\n  input.workflow ||\n  \"unknown_workflow\";\n\nconst execution_id = String(execution.id || input.execution_id || \"unknown_execution\");\n\nconst node =\n  (execution.lastNodeExecuted && execution.lastNodeExecuted.name) ||\n  input.node ||\n  \"unknown_node\";\n\nconst error_message = String(error.message || input.message || \"Unknown error\");\nconst stack = String(error.stack || input.stack || \"\");\n\nconst payload_json = safeStringify({\n  ts,\n  workflow,\n  execution_id,\n  node,\n  error_message,\n  stack,\n  raw: input,\n});\n\nreturn [\n  {\n    json: {\n      ts,\n      workflow,\n      execution_id,\n      node,\n      error_message,\n      stack,\n      payload_json,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        -64
+      ],
+      "id": "6d3cc058-66da-4f22-a502-a2fa96d75728",
+      "name": "Normalize Error Payload"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 357658288,
+          "mode": "list",
+          "cachedResultName": "error_log",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ts": "={{$json.ts}}",
+            "workflow": "={{$json.workflow}}",
+            "execution_id": "={{$json.execution_id}}",
+            "node": "={{$json.node}}",
+            "error_message": "={{$json.error_message}}",
+            "stack": "={{$json.stack}}",
+            "payload_json": "={{$json.payload_json}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ts",
+              "displayName": "ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "stack",
+              "displayName": "stack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload_json",
+              "displayName": "payload_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        112,
+        -208
+      ],
+      "id": "1079942d-6b1b-429a-bb20-262c0b7917d0",
+      "name": "Append Error → error_log",
+      "credentials": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "chatId": "<TELEGRAM_CHAT_ID>",
+        "text": "=🚨 n8n WORKFLOW ERROR workflow: {{$json.workflow}} execution_id: {{$json.execution_id}} node: {{$json.node}} message: {{$json.error_message}}  stack: {{$json.stack}}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        160,
+        64
+      ],
+      "id": "ab5f2589-6a54-452c-af0e-074bd683bd78",
+      "name": "Telegram Alert — Workflow Error",
+      "webhookId": "<REDACTED>",
+      "credentials": "<REDACTED>"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger (Global)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Error Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Error Payload": {
+      "main": [
+        [
+          {
+            "node": "Append Error → error_log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Alert — Workflow Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "<REDACTED>",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "<REDACTED>"
+  },
+  "id": "<REDACTED>",
+  "tags": []
+}

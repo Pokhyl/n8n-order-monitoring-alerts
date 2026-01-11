@@ -1,0 +1,1043 @@
+{
+  "name": "Order Monitoring (Main)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-status",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -912,
+        -144
+      ],
+      "id": "b9c0decd-67c0-4326-9f95-2af840e1dacd",
+      "name": "Webhook Trigger — Order Status",
+      "webhookId": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9d7c196d-1f40-4129-adbd-6d092f8fe4bf",
+              "name": "sla_new_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "d7349af5-e86b-443c-96c0-64e8575142c3",
+              "name": "sla_pending_minutes",
+              "value": 30,
+              "type": "number"
+            },
+            {
+              "id": "8a915881-0aab-4f1d-9236-de61a1c745cd",
+              "name": "cooldown_minutes",
+              "value": 60,
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -704,
+        -144
+      ],
+      "id": "3f4fd17f-7694-4625-97be-84b58bf2193c",
+      "name": "Set: Config (SLA + cooldown)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3623dbd8-6fe1-4407-bd7c-93af12b629e6",
+              "leftValue": "={{$json.body.order_id}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "12d97e4c-307f-4e6b-b06d-555966f81a66",
+              "leftValue": "={{$json.body.status}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "c5dc6fdd-5e21-49c7-94d1-01e56a7f4867",
+              "leftValue": "={{$json.body.updated_at}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -496,
+        -144
+      ],
+      "id": "69d13663-5a9f-4592-9758-3e07924395d6",
+      "name": "Validate Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? {};\n\nconst order_id = String(body.order_id ?? '').trim();\nconst status = String(body.status ?? '').trim();\nconst updated_at_raw = body.updated_at;\n\nconst sla_new_minutes = Number($json.sla_new_minutes);\nconst sla_pending_minutes = Number($json.sla_pending_minutes);\nconst cooldown_minutes = Number($json.cooldown_minutes);\n\nconst updatedAt = new Date(updated_at_raw);\nif (!order_id) throw new Error('order_id is empty');\nif (!status) throw new Error('status is empty');\nif (Number.isNaN(updatedAt.getTime())) throw new Error('updated_at is invalid');\n\nconst now = new Date();\nconst ageMs = Math.max(0, now.getTime() - updatedAt.getTime());\nconst age_minutes = Math.floor(ageMs / 60000);\n\nreturn [\n  {\n    json: {\n      order_id,\n      status,\n      updated_at: updatedAt.toISOString(),\n      now_ts: now.toISOString(),\n      age_minutes,\n      sla_new_minutes,\n      sla_pending_minutes,\n      cooldown_minutes,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        -240
+      ],
+      "id": "3cf77496-755f-43b4-bc1a-a68ac1e5aad4",
+      "name": "Normalize Order Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const status = String($json.status ?? '').toUpperCase();\nconst age = Number($json.age_minutes ?? 0);\n\nconst slaNew = Number($json.sla_new_minutes ?? 0);\nconst slaPending = Number($json.sla_pending_minutes ?? 0);\n\nlet alert_needed = false;\nlet alert_type = null;\nlet severity = null;\nlet reason = null;\n\nif (status === 'NEW' && age >= slaNew) {\n  alert_needed = true;\n  alert_type = 'stalled_new';\n  severity = 'warn';\n  reason = 'sla_breached_new';\n}\n\nif ((status === 'PAYMENT_PENDING' || status === 'PENDING_PAYMENT') && age >= slaPending) {\n  alert_needed = true;\n  alert_type = 'stalled_payment';\n  severity = 'critical';\n  reason = 'sla_breached_payment_pending';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      alert_needed,\n      alert_type,\n      severity,\n      reason,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -240
+      ],
+      "id": "c49bba85-c4a8-4c16-a1b2-a307881e7fc3",
+      "name": "Determine Alert (Rules)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert_needed = Boolean($json.alert_needed);\nconst order_id = String($json.order_id ?? '');\nconst alert_type = $json.alert_type ? String($json.alert_type) : null;\n\nconst incident_key =\n  alert_needed && order_id && alert_type\n    ? `${order_id}:${alert_type}`\n    : null;\n\nreturn [\n  {\n    json: {\n      ...$json,\n      incident_key,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        -256
+      ],
+      "id": "709d41e9-0647-4552-aa50-4bd5cf4198f4",
+      "name": "Compute incident_key"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        704,
+        -240
+      ],
+      "id": "27125954-e2e9-4352-9f20-db1a0fd8707b",
+      "name": "Merge: Current + History"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Apply Cooldown (Decision)\n// Mode: Run Once for All Items\n\nconst all = $input.all().map(i => (i.json ?? {}));\n\nfunction isNonEmptyObject(o) {\n  return o && typeof o === 'object' && Object.keys(o).length > 0;\n}\n\nfunction toDate(v) {\n  if (!v) return null;\n  const d = new Date(v);\n  return Number.isNaN(d.getTime()) ? null : d;\n}\n\nfunction diffMinutes(a, b) {\n  return Math.floor((a.getTime() - b.getTime()) / 60000);\n}\n\n// Identify current vs history\nconst current =\n  all.find(o => o.now_ts || o.updated_at || o.age_minutes !== undefined || o.alert_needed !== undefined) ||\n  all[0] ||\n  {};\n\nconst history =\n  all.find(o => o !== current && isNonEmptyObject(o)) ||\n  null;\n\nconst now = toDate(current.now_ts) || new Date();\n\nconst alertNeeded = Boolean(current.alert_needed);\nconst cooldownMinutes = Number(current.cooldown_minutes ?? 0);\n\nconst historyLastAlert = toDate(history?.last_alert_ts);\nconst minutesSinceLastAlert = historyLastAlert ? diffMinutes(now, historyLastAlert) : null;\n\nlet shouldAlert = false;\nlet suppressReason = null;\nlet cooldownRemainingMinutes = null;\n\nif (!alertNeeded) {\n  shouldAlert = false;\n  suppressReason = 'alert_not_needed';\n} else if (!historyLastAlert) {\n  shouldAlert = true; // first time\n} else if (cooldownMinutes <= 0) {\n  shouldAlert = true; // cooldown disabled\n} else if (minutesSinceLastAlert >= cooldownMinutes) {\n  shouldAlert = true; // cooldown passed\n} else {\n  shouldAlert = false;\n  suppressReason = 'cooldown_active';\n  cooldownRemainingMinutes = Math.max(0, cooldownMinutes - minutesSinceLastAlert);\n}\n\n// Incident state for upsert\nconst firstSeenTs = history?.first_seen_ts || now.toISOString();\nconst lastSeenTs = now.toISOString();\n\n// Update last_alert_ts only when we actually alert\nconst lastAlertTsOut = shouldAlert ? now.toISOString() : (history?.last_alert_ts || null);\n\n// Keep last_event_id only when alert happens (we’ll set it later in the Sheets upsert mapping)\nconst lastEventIdOut = shouldAlert ? null : (history?.last_event_id || null);\n\n// Details snapshot (string)\nconst detailsObj = {\n  current,\n  history: history || null,\n  decision: {\n    alert_needed: alertNeeded,\n    should_alert: shouldAlert,\n    suppress_reason: suppressReason,\n    cooldown_minutes: cooldownMinutes,\n    minutes_since_last_alert: minutesSinceLastAlert,\n    cooldown_remaining_minutes: cooldownRemainingMinutes,\n  },\n};\nconst detailsJsonOut = JSON.stringify(detailsObj);\n\nreturn [\n  {\n    json: {\n      ...current,\n\n      history_found: Boolean(history),\n\n      // for incidents upsert\n      first_seen_ts: firstSeenTs,\n      last_seen_ts: lastSeenTs,\n      last_alert_ts: lastAlertTsOut,\n      last_event_id: lastEventIdOut,\n      details_json: detailsJsonOut,\n\n      // decision outputs\n      minutes_since_last_alert: minutesSinceLastAlert,\n      should_alert: shouldAlert,\n      suppress_reason: suppressReason,\n      cooldown_remaining_minutes: cooldownRemainingMinutes,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        -240
+      ],
+      "id": "61d472bd-8c84-4a8c-ba2f-b0656dbd346d",
+      "name": "Apply Cooldown (Decision)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fb356236-6624-4fb5-8dca-a5d4b296c7d8",
+              "leftValue": "={{$json.should_alert}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1568,
+        -224
+      ],
+      "id": "e33120e3-0ff3-4838-a645-5d25f84aa266",
+      "name": "IF: should_alert"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "events",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ts": "={{$json.now_ts}}",
+            "order_id": "={{ $json.order_id }}",
+            "incident_key": "={{ $json.incident_key }}",
+            "alert_type": "={{ $json.alert_type }}",
+            "severity": "={{ $json.severity }}",
+            "status": "={{ $json.status }}",
+            "event_id": "={{$execution.id + ':' + $json.incident_key}}",
+            "details_json": "={{JSON.stringify($json)}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ts",
+              "displayName": "ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "incident_key",
+              "displayName": "incident_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "details_json",
+              "displayName": "details_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1728,
+        -368
+      ],
+      "id": "03dde7ef-bce4-4f2b-bd1a-be471084ef82",
+      "name": "Append Event → events",
+      "credentials": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 856147456,
+          "mode": "list",
+          "cachedResultName": "incidents",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "incident_key",
+              "lookupValue": "={{$json.incident_key}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        544,
+        -96
+      ],
+      "id": "07584050-549d-41f6-a29c-766390a53569",
+      "name": "Read Incidents → incidents (by incident_key)",
+      "alwaysOutputData": true,
+      "credentials": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 856147456,
+          "mode": "list",
+          "cachedResultName": "incidents",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id": "={{ $json.order_id }}",
+            "incident_key": "={{$json.incident_key}}",
+            "alert_type": "={{$json.alert_type}}",
+            "severity": "={{ $json.severity }}",
+            "status": "={{ $json.status }}",
+            "first_seen_ts": "={{ $json.first_seen_ts }}",
+            "last_seen_ts": "={{ $json.last_seen_ts }}",
+            "details_json": "={{ $json.details_json }}"
+          },
+          "matchingColumns": [
+            "incident_key"
+          ],
+          "schema": [
+            {
+              "id": "incident_key",
+              "displayName": "incident_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "first_seen_ts",
+              "displayName": "first_seen_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_seen_ts",
+              "displayName": "last_seen_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_alert_ts",
+              "displayName": "last_alert_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "last_event_id",
+              "displayName": "last_event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "details_json",
+              "displayName": "details_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1136,
+        -80
+      ],
+      "id": "bb5e1755-48a1-4cfc-8655-8bd6a59a1137",
+      "name": "Upsert Incident (Seen) → incidents",
+      "credentials": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "incident_key",
+        "joinMode": "keepEverything",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1936,
+        -224
+      ],
+      "id": "a1a6d2a6-f294-4a42-8353-7f6b019176ee",
+      "name": "Merge: Decision + Event (by incident_key)"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "incident_key",
+        "joinMode": "keepEverything",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        -224
+      ],
+      "id": "7e4b10bf-5f08-41a9-8778-e39320de9a39",
+      "name": "Merge: Decision + Incident (by incident_key)"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 856147456,
+          "mode": "list",
+          "cachedResultName": "incidents",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id": "={{ $json.order_id }}",
+            "incident_key": "={{$json.incident_key}}",
+            "alert_type": "={{$json.alert_type}}",
+            "severity": "={{ $json.severity }}",
+            "status": "={{ $json.status }}",
+            "first_seen_ts": "={{ $json.first_seen_ts }}",
+            "last_seen_ts": "={{$json.now_ts}}",
+            "last_alert_ts": "={{$json.now_ts}}",
+            "last_event_id": "={{$execution.id + ':' + $json.incident_key}}",
+            "details_json": "={{ $json.details_json }}"
+          },
+          "matchingColumns": [
+            "incident_key"
+          ],
+          "schema": [
+            {
+              "id": "incident_key",
+              "displayName": "incident_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "first_seen_ts",
+              "displayName": "first_seen_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_seen_ts",
+              "displayName": "last_seen_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_alert_ts",
+              "displayName": "last_alert_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_event_id",
+              "displayName": "last_event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "details_json",
+              "displayName": "details_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2176,
+        -224
+      ],
+      "id": "c0bb2c62-8e43-437c-9075-cd83ec93ffff",
+      "name": "Upsert Incident (Alerted) → incidents",
+      "credentials": "<REDACTED>"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1e001882-1444-4da1-901a-a911a96fa85a",
+              "leftValue": "={{$json.alert_needed}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        128,
+        -240
+      ],
+      "id": "d80fb080-b2da-4038-96f1-51cb10485007",
+      "name": "IF: alert_needed"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "<GOOGLE_SHEET_ID>",
+          "mode": "list",
+          "cachedResultName": "SPREADSHEET_NAME",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL>"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "events",
+          "cachedResultUrl": "<GOOGLE_SHEET_URL#gid>"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{$execution.id + ':suppressed:' + $json.incident_key}}",
+            "ts": "={{$json.now_ts}}",
+            "incident_key": "={{$json.incident_key}}",
+            "order_id": "={{$json.order_id}}",
+            "alert_type": "={{$json.alert_type}}",
+            "severity": "={{$json.severity}}",
+            "status": "ignored",
+            "details_json": "={{JSON.stringify($json)}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ts",
+              "displayName": "ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "incident_key",
+              "displayName": "incident_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "details_json",
+              "displayName": "details_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1776,
+        -32
+      ],
+      "id": "2046a5ba-0a3d-434a-ae0e-24cf29d6e948",
+      "name": "Append Event (Suppressed) → events",
+      "credentials": "<REDACTED>"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger — Order Status": {
+      "main": [
+        [
+          {
+            "node": "Set: Config (SLA + cooldown)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Config (SLA + cooldown)": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Normalize Order Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Order Payload": {
+      "main": [
+        [
+          {
+            "node": "Determine Alert (Rules)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Alert (Rules)": {
+      "main": [
+        [
+          {
+            "node": "IF: alert_needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute incident_key": {
+      "main": [
+        [
+          {
+            "node": "Merge: Current + History",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Incidents → incidents (by incident_key)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Current + History": {
+      "main": [
+        [
+          {
+            "node": "Apply Cooldown (Decision)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Cooldown (Decision)": {
+      "main": [
+        [
+          {
+            "node": "Upsert Incident (Seen) → incidents",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge: Decision + Incident (by incident_key)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: should_alert": {
+      "main": [
+        [
+          {
+            "node": "Append Event → events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge: Decision + Event (by incident_key)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append Event (Suppressed) → events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Incidents → incidents (by incident_key)": {
+      "main": [
+        [
+          {
+            "node": "Merge: Current + History",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Upsert Incident (Seen) → incidents": {
+      "main": [
+        [
+          {
+            "node": "Merge: Decision + Incident (by incident_key)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Append Event → events": {
+      "main": [
+        [
+          {
+            "node": "Merge: Decision + Event (by incident_key)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge: Decision + Incident (by incident_key)": {
+      "main": [
+        [
+          {
+            "node": "IF: should_alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge: Decision + Event (by incident_key)": {
+      "main": [
+        [
+          {
+            "node": "Upsert Incident (Alerted) → incidents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: alert_needed": {
+      "main": [
+        [
+          {
+            "node": "Compute incident_key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "a3jwOY6puIrsdLus"
+  },
+  "versionId": "<REDACTED>",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "<REDACTED>"
+  },
+  "id": "<REDACTED>",
+  "tags": []
+}
